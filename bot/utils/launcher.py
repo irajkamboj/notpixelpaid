@@ -37,33 +37,7 @@ def get_proxy(raw_proxy: str) -> Proxy:
     return Proxy.from_str(proxy=raw_proxy).as_url if raw_proxy else None
 
 def get_keys():
-    keys_usage = {}
-    with open("keyfor10accs.txt", "r") as f:
-        keys = [line.strip() for line in f.readlines()]
-
-    for key in keys:
-        if key == "":
-            continue
-        keys_usage.update({key: 10})
-
-    with open("keyfor25accs.txt", "r") as f:
-        keys = [line.strip() for line in f.readlines()]
-
-    for key in keys:
-        if key == "":
-            continue
-        keys_usage.update({key: 25})
-
-    with open("keyfor50accs.txt", "r") as f:
-
-        keys = [line.strip() for line in f.readlines()]
-
-    for key in keys:
-        if key == "":
-            continue
-        keys_usage.update({key: 50})
-    # print(keys_usage)
-    return keys_usage
+    return {"unrestricted_key": float('inf')}
 
 
 async def process() -> None:
@@ -139,21 +113,10 @@ async def run_tasks(accounts: [Any, Any, list], used_session_names: [str]):
     key_index = 0
     tasks = []
 
-    total_key = 0
-    for key in keys.keys():
-        total_key += keys[key]
-    if total_key < len(accounts):
-        logger.warning(f"<yellow>Keys is not enough for all of your accounts! <cyan>{total_key}</cyan> keys/ <red>{len(accounts)}</red> accounts</yellow>")
-        return
+   # Remove key limit checks entirely
 
-    for account in accounts:
-        if keys[key_list[key_index]] - 1 >= 0:
-            key = key_list[key_index]
-            keys[key_list[key_index]] -= 1
-        else:
-            key_index += 1
-            key = key_list[key_index]
-            keys[key_list[key_index]] -= 1
+    key = "unrestricted_key"  # Use a default key
+    
         session_name, user_agent, raw_proxy = account.values()
         first_run = session_name not in used_session_names
         tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
