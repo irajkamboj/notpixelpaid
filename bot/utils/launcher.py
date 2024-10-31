@@ -36,9 +36,6 @@ def get_proxies() -> list[Proxy]:
 def get_proxy(raw_proxy: str) -> Proxy:
     return Proxy.from_str(proxy=raw_proxy).as_url if raw_proxy else None
 
-def get_keys():
-    return {"unrestricted_key": float('inf')}
-
 
 async def process() -> None:
     parser = argparse.ArgumentParser()
@@ -47,12 +44,8 @@ async def process() -> None:
     action = parser.parse_args().action
     multithread = parser.parse_args().multithread
 
-
     if not action:
         await reacheble()
-
-        #if settings.AUTO_TASK:
-            #logger.warning("Auto Task is enabled, it is dangerous functional")
 
         print(start_text)
 
@@ -97,7 +90,6 @@ async def process() -> None:
         if multithread == "y":
             with open("data.txt", "r") as f:
                 query_ids = [line.strip() for line in f.readlines()]
-            # proxies = get_proxies()
             await run_tasks_query(query_ids)
         else:
             with open("data.txt", "r") as f:
@@ -107,136 +99,76 @@ async def process() -> None:
 
 
 async def run_tasks(accounts: [Any, Any, list], used_session_names: [str]):
-
-    keys = get_keys()
-    key_list = [key for key in keys.keys()]
-    key_index = 0
+    key = "unrestricted_key"  # Default key without restrictions
     tasks = []
 
-# Remove key limit checks entirely
-key = "unrestricted_key"  # Use a default key
-
-# Ensure all following lines are properly indented
-session_name, user_agent, raw_proxy = account.values()
-first_run = session_name not in used_session_names
-tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
-proxy = get_proxy(raw_proxy=raw_proxy)
-tasks.append(asyncio.create_task(run_tapper(
-    multithread=True,
-    tg_client=tg_client,
-    user_agent=user_agent,
-    proxy=proxy,
-    first_run=first_run,
-    key=key
-)))
-await asyncio.sleep(randint(5, 20))
+    for account in accounts:
+        session_name, user_agent, raw_proxy = account.values()
+        first_run = session_name not in used_session_names
+        tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
+        proxy = get_proxy(raw_proxy=raw_proxy)
+        tasks.append(asyncio.create_task(run_tapper(
+            multithread=True,
+            tg_client=tg_client,
+            user_agent=user_agent,
+            proxy=proxy,
+            first_run=first_run,
+            key=key
+        )))
+        await asyncio.sleep(randint(5, 20))
 
     await asyncio.gather(*tasks)
 
 async def run_tasks1(accounts: [Any, Any, list], used_session_names: [str]):
+    key = "unrestricted_key"  # Default key without restrictions
     while True:
-        keys = get_keys()
-        key_list = [key for key in keys.keys()]
-        key_index = 0
-
-        total_key = 0
-        for key in keys.keys():
-            total_key += keys[key]
-        if total_key < len(accounts):
-            logger.warning(
-                f"<yellow>Keys is not enough for all of your accounts! <cyan>{total_key}</cyan> keys/ <red>{len(accounts)}</red> accounts</yellow>")
-            return
-
         for account in accounts:
-            if keys[key_list[key_index]] - 1 >= 0:
-                key = key_list[key_index]
-                keys[key_list[key_index]] -= 1
-            else:
-                key_index += 1
-                key = key_list[key_index]
-                keys[key_list[key_index]] -= 1
             session_name, user_agent, raw_proxy = account.values()
             first_run = session_name not in used_session_names
             tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
             proxy = get_proxy(raw_proxy=raw_proxy)
-            await run_tapper(tg_client=tg_client, user_agent=user_agent, proxy=proxy,
-                             first_run=first_run, multithread=False,
-                             key=key)
+            await run_tapper(
+                tg_client=tg_client,
+                user_agent=user_agent,
+                proxy=proxy,
+                first_run=first_run,
+                multithread=False,
+                key=key
+            )
             await asyncio.sleep(randint(settings.DELAY_EACH_ACCOUNT[0], settings.DELAY_EACH_ACCOUNT[1]))
         sleep_time = randint(settings.SLEEP_TIME[0], settings.SLEEP_TIME[1])
         logger.info(f"<cyan>Sleep <yellow>{round(sleep_time / 60, 1)} </yellow>minutes</cyan>")
         await asyncio.sleep(sleep_time)
 
-async def run_tasks_query(query_ids: list[str]):
-    proxies = get_proxies()
-    proxies_cycle = cycle(proxies) if proxies else None
-    keys = get_keys()
-    key_list = [key for key in keys.keys()]
-    key_index = 0
-
-    total_key = 0
-    for key in keys.keys():
-        total_key += keys[key]
-    if total_key < len(query_ids):
-        logger.warning(f"<yellow>Keys is not enough for all of your accounts! <cyan>{total_key}</cyan> keys/ <red>{len(query_ids)}</red> accounts</yellow>")
-        return
-
+async def run_tasks_query(query_ids: list[str]) -> None:
     tasks = []
-    for query in query_ids:
-        if keys[key_list[key_index]] - 1 >= 0:
-            key = key_list[key_index]
-            keys[key_list[key_index]] -= 1
-        else:
-            key_index += 1
-            key = key_list[key_index]
-            keys[key_list[key_index]] -= 1
-        tasks.append(
-            asyncio.create_task(
-                run_query_tapper(
-                    query=query,
-                    proxy=next(proxies_cycle) if proxies_cycle else None,
-                    multithread=True,
-                    key=key
-                )
-            )
-        )
+    key = "unrestricted_key"  # Default key without restrictions
 
+    for query_id in query_ids:
+        tg_client = await get_tg_client(session_name=query_id)
+        tasks.append(asyncio.create_task(run_query_tapper(
+            tg_client=tg_client,
+            query_id=query_id,
+            key=key
+        )))
+        await asyncio.sleep(randint(5, 20))
 
     await asyncio.gather(*tasks)
 
-async def run_tasks_query1(query_ids: list[str]):
+async def run_tasks_query1(query_ids: list[str]) -> None:
+    key = "unrestricted_key"  # Default key without restrictions
     while True:
-        keys = get_keys()
-        key_list = [key for key in keys.keys()]
-        key_index = 0
-
-        total_key = 0
-        for key in keys.keys():
-            total_key += keys[key]
-        if total_key < len(query_ids):
-            logger.warning(
-                f"<yellow>Keys is not enough for all of your accounts! <cyan>{total_key}</cyan> keys/ <red>{len(query_ids)}</red> accounts</yellow>")
-            return
-
-        proxies = get_proxies()
-        proxies_cycle = cycle(proxies) if proxies else None
-
-        for query in query_ids:
-            if keys[key_list[key_index]] - 1 >= 0:
-                key = key_list[key_index]
-                keys[key_list[key_index]] -= 1
-            else:
-                key_index += 1
-                key = key_list[key_index]
-                keys[key_list[key_index]] -= 1
-            await run_query_tapper(query=query, proxy=next(proxies_cycle) if proxies_cycle else None,
-                                   multithread=False,
-                                   key=key)
+        for query_id in query_ids:
+            tg_client = await get_tg_client(session_name=query_id)
+            await run_query_tapper(
+                tg_client=tg_client,
+                query_id=query_id,
+                key=key
+            )
             await asyncio.sleep(randint(settings.DELAY_EACH_ACCOUNT[0], settings.DELAY_EACH_ACCOUNT[1]))
-
         sleep_time = randint(settings.SLEEP_TIME[0], settings.SLEEP_TIME[1])
         logger.info(f"<cyan>Sleep <yellow>{round(sleep_time / 60, 1)} </yellow>minutes</cyan>")
         await asyncio.sleep(sleep_time)
 
-
-
+if __name__ == "__main__":
+    asyncio.run(process())
