@@ -1,31 +1,43 @@
+import os
+import glob
 import asyncio
 import argparse
+import sys
 from itertools import cycle
-from random import randint
-from typing import Any
+
+from pyrogram import Client
 from better_proxy import Proxy
 
 from bot.config import settings
-from bot.core.image_checker import reacheble
 from bot.utils import logger
-from bot.core.tapper import run_tapper
-from bot.core.query import run_query_tapper
-from bot.core.registrator import register_sessions, get_tg_client
-from bot.utils.accounts import Accounts
-from bot.utils.firstrun import load_session_names
+from bot.core.tapper import run_tapper, run_tapper1
+from bot.core.query import run_query_tapper, run_query_tapper1
+from bot.core.registrator import register_sessions
+from .ps import check_base_url
 
 
-start_text = """                                             
+start_text = """
+                                                                                                                                                                                                         
 Select an action:
 
-    1. Run bot (Session)
+    1. Run clicker (Session)
     2. Create session
-    3. Run bot (Query)
-    
+    3. Run clicker (Query)
 """
 
+global tg_clients
+
+def get_session_names() -> list[str]:
+    session_names = sorted(glob.glob("sessions/*.session"))
+    session_names = [
+        os.path.splitext(os.path.basename(file))[0] for file in session_names
+    ]
+
+    return session_names
+
+
 def get_proxies() -> list[Proxy]:
-    if settings.USE_PROXIES_FROM_FILE:
+    if settings.USE_PROXY_FROM_FILE:
         with open(file="bot/config/proxies.txt", encoding="utf-8-sig") as file:
             proxies = [Proxy.from_str(proxy=row.strip()).as_url for row in file]
     else:
@@ -33,20 +45,42 @@ def get_proxies() -> list[Proxy]:
 
     return proxies
 
-def get_proxy(raw_proxy: str) -> Proxy:
-    return Proxy.from_str(proxy=raw_proxy).as_url if raw_proxy else None
+
+async def get_tg_clients() -> list[Client]:
+    global tg_clients
+
+    session_names = get_session_names()
+
+    if not session_names:
+        raise FileNotFoundError("Not found session files")
+
+    if not settings.API_ID or not settings.API_HASH:
+        raise ValueError("API_ID and API_HASH not found in the .env file.")
+
+    tg_clients = [
+        Client(
+            name=session_name,
+            api_id=settings.API_ID,
+            api_hash=settings.API_HASH,
+            workdir="sessions/",
+            plugins=dict(root="bot/plugins"),
+        )
+        for session_name in session_names
+    ]
+
+    return tg_clients
 
 
 async def process() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action", type=int, help="Action to perform")
     parser.add_argument("-m", "--multithread", type=str, help="Enable multi-threading")
+
     action = parser.parse_args().action
-    multithread = parser.parse_args().multithread
+    ans = parser.parse_args().multithread
+    logger.info(f"Detected {len(get_session_names())} sessions | {len(get_proxies())} proxies")
 
     if not action:
-        await reacheble()
-
         print(start_text)
 
         while True:
@@ -60,115 +94,73 @@ async def process() -> None:
                 action = int(action)
                 break
 
-    used_session_names = load_session_names()
-
     if action == 2:
         await register_sessions()
     elif action == 1:
-        if not multithread:
+        if ans is None:
             while True:
-                multithread = input("> Do you want to run the bot with multi-thread? (y/n)")
+                ans = input("> Do you want to run the bot with multi-thread? (y/n) ")
+                if ans not in ["y", "n"]:
+                    logger.warning("Answer must be y or n")
+                else:
+                    break
 
-                if multithread.lower() not in ["y", "n"]:
-                    logger.warning("Answer must be y or n")
-                else:
-                    break
-        if multithread == "y":
-            accounts = await Accounts().get_accounts()
-            await run_tasks(accounts=accounts, used_session_names=used_session_names)
+        if ans == "y":
+            tg_clients = await get_tg_clients()
+
+            await run_tasks(tg_clients=tg_clients)
         else:
-            accounts = await Accounts().get_accounts()
-            await run_tasks1(accounts=accounts, used_session_names=used_session_names)
+            tg_clients = await get_tg_clients()
+            proxies = get_proxies()
+            await run_tapper1(tg_clients=tg_clients, proxies=proxies)
     elif action == 3:
-        if multithread is None:
+        if ans is None:
             while True:
-                multithread = input("> Do you want to run the bot with multi-thread? (y/n) ")
-                if multithread not in ["y", "n"]:
+                ans = input("> Do you want to run the bot with multi-thread? (y/n) ")
+                if ans not in ["y", "n"]:
                     logger.warning("Answer must be y or n")
                 else:
                     break
-        if multithread == "y":
+        if ans == "y":
             with open("data.txt", "r") as f:
                 query_ids = [line.strip() for line in f.readlines()]
+            # proxies = get_proxies()
             await run_tasks_query(query_ids)
         else:
             with open("data.txt", "r") as f:
                 query_ids = [line.strip() for line in f.readlines()]
+            proxies = get_proxies()
 
-            await run_tasks_query1(query_ids)
+            await run_query_tapper1(query_ids, proxies)
 
-
-async def run_tasks(accounts: [Any, Any, list], used_session_names: [str]):
-    key = "unrestricted_key"  # Default key without restrictions
-    tasks = []
-
-    for account in accounts:
-        session_name, user_agent, raw_proxy = account.values()
-        first_run = session_name not in used_session_names
-        tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
-        proxy = get_proxy(raw_proxy=raw_proxy)
-        tasks.append(asyncio.create_task(run_tapper(
-            multithread=True,
-            tg_client=tg_client,
-            user_agent=user_agent,
-            proxy=proxy,
-            first_run=first_run,
-            key=key
-        )))
-        await asyncio.sleep(randint(5, 20))
+async def run_tasks_query(query_ids: list[str]):
+    proxies = get_proxies()
+    proxies_cycle = cycle(proxies) if proxies else None
+    account_name = [i for i in range(len(query_ids) + 10)]
+    name_cycle = cycle(account_name)
+    tasks = [
+        asyncio.create_task(
+            run_query_tapper(
+                query=query,
+                proxy=next(proxies_cycle) if proxies_cycle else None,
+                name=f"Account{next(name_cycle)}"
+            )
+        )
+        for query in query_ids
+    ]
 
     await asyncio.gather(*tasks)
-
-async def run_tasks1(accounts: [Any, Any, list], used_session_names: [str]):
-    key = "unrestricted_key"  # Default key without restrictions
-    while True:
-        for account in accounts:
-            session_name, user_agent, raw_proxy = account.values()
-            first_run = session_name not in used_session_names
-            tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
-            proxy = get_proxy(raw_proxy=raw_proxy)
-            await run_tapper(
+async def run_tasks(tg_clients: list[Client]):
+    proxies = get_proxies()
+    proxies_cycle = cycle(proxies) if proxies else None
+    tasks = [
+        asyncio.create_task(
+            run_tapper(
                 tg_client=tg_client,
-                user_agent=user_agent,
-                proxy=proxy,
-                first_run=first_run,
-                multithread=False,
-                key=key
+                proxy=next(proxies_cycle) if proxies_cycle else None,
             )
-            await asyncio.sleep(randint(settings.DELAY_EACH_ACCOUNT[0], settings.DELAY_EACH_ACCOUNT[1]))
-        sleep_time = randint(settings.SLEEP_TIME[0], settings.SLEEP_TIME[1])
-        logger.info(f"<cyan>Sleep <yellow>{round(sleep_time / 60, 1)} </yellow>minutes</cyan>")
-        await asyncio.sleep(sleep_time)
-
-async def run_tasks_query(query_ids: list[str]) -> None:
-    tasks = []
-    key = "unrestricted_key"  # Default key without restrictions
-
-    for query_id in query_ids:
-        tg_client = await get_tg_client(session_name=query_id)
-        tasks.append(asyncio.create_task(run_query_tapper(
-            tg_client=tg_client,
-            query_id=query_id,
-            key=key
-        )))
-        await asyncio.sleep(randint(5, 20))
+        )
+        for tg_client in tg_clients
+    ]
 
     await asyncio.gather(*tasks)
-
-async def run_tasks_query1(query_ids: list[str]) -> None:
-    key = "unrestricted_key"  # Default key without restrictions
-    while True:
-        for query_id in query_ids:
-            tg_client = await get_tg_client(session_name=query_id)
-            await run_query_tapper(
-                tg_client=tg_client,
-                query_id=query_id,
-                key=key
-            )
-            await asyncio.sleep(randint(settings.DELAY_EACH_ACCOUNT[0], settings.DELAY_EACH_ACCOUNT[1]))
-        sleep_time = randint(settings.SLEEP_TIME[0], settings.SLEEP_TIME[1])
-        logger.info(f"<cyan>Sleep <yellow>{round(sleep_time / 60, 1)} </yellow>minutes</cyan>")
-        await asyncio.sleep(sleep_time)
-
-if __name__ == "__main__":
-    asyncio.run(process())
