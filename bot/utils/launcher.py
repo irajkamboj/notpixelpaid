@@ -113,17 +113,23 @@ async def run_tasks(accounts: [Any, Any, list], used_session_names: [str]):
     key_index = 0
     tasks = []
 
-   # Remove key limit checks entirely
+# Remove key limit checks entirely
+key = "unrestricted_key"  # Use a default key
 
-    key = "unrestricted_key"  # Use a default key
-    
-        session_name, user_agent, raw_proxy = account.values()
-        first_run = session_name not in used_session_names
-        tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
-        proxy = get_proxy(raw_proxy=raw_proxy)
-        tasks.append(asyncio.create_task(run_tapper(multithread=True, tg_client=tg_client, user_agent=user_agent, proxy=proxy,
-                                                        first_run=first_run, key=key)))
-        await asyncio.sleep(randint(5, 20))
+# Ensure all following lines are properly indented
+session_name, user_agent, raw_proxy = account.values()
+first_run = session_name not in used_session_names
+tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
+proxy = get_proxy(raw_proxy=raw_proxy)
+tasks.append(asyncio.create_task(run_tapper(
+    multithread=True,
+    tg_client=tg_client,
+    user_agent=user_agent,
+    proxy=proxy,
+    first_run=first_run,
+    key=key
+)))
+await asyncio.sleep(randint(5, 20))
 
     await asyncio.gather(*tasks)
 
