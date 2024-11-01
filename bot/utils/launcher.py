@@ -14,17 +14,17 @@ from bot.core.registrator import register_sessions, get_tg_client
 from bot.utils.accounts import Accounts
 from bot.utils.firstrun import load_session_names
 
-
+# Initial text for starting the bot
 start_text = """                                             
 Select an action:
 
     1. Run bot (Session)
     2. Create session
     3. Run bot (Query)
-    
 """
 
 def get_proxies() -> list[Proxy]:
+    """Load proxies from file if enabled in settings."""
     if settings.USE_PROXIES_FROM_FILE:
         with open(file="bot/config/proxies.txt", encoding="utf-8-sig") as file:
             proxies = [Proxy.from_str(proxy=row.strip()).as_url for row in file]
@@ -34,10 +34,11 @@ def get_proxies() -> list[Proxy]:
     return proxies
 
 def get_proxy(raw_proxy: str) -> Proxy:
+    """Convert raw proxy string to Proxy object."""
     return Proxy.from_str(proxy=raw_proxy).as_url if raw_proxy else None
 
-
 async def process() -> None:
+    """Main process to handle bot actions based on user input or arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action", type=int, help="Action to perform")
     parser.add_argument("-m", "--multithread", type=str, help="Enable multi-threading")
@@ -46,16 +47,13 @@ async def process() -> None:
 
     if not action:
         await reacheble()
-
         print(start_text)
-
         while True:
             action = input("> ")
-
             if not action.isdigit():
-                logger.warning("Action must be number")
+                logger.warning("Action must be a number")
             elif action not in ["1", "2", "3"]:
-                logger.warning("Action must be 1, 2 or 3")
+                logger.warning("Action must be 1, 2, or 3")
             else:
                 action = int(action)
                 break
@@ -67,18 +65,16 @@ async def process() -> None:
     elif action == 1:
         if not multithread:
             while True:
-                multithread = input("> Do you want to run the bot with multi-thread? (y/n)")
-
+                multithread = input("> Do you want to run the bot with multi-thread? (y/n) ")
                 if multithread.lower() not in ["y", "n"]:
                     logger.warning("Answer must be y or n")
                 else:
                     break
+        accounts = await Accounts().get_accounts()
         if multithread == "y":
-            accounts = await Accounts().get_accounts()
             await run_tasks(accounts=accounts, used_session_names=used_session_names)
         else:
-            accounts = await Accounts().get_accounts()
-            await run_tasks1(accounts=accounts, used_session_names=used_session_names)
+            await run_tasks_single(accounts=accounts, used_session_names=used_session_names)
     elif action == 3:
         if multithread is None:
             while True:
@@ -87,88 +83,69 @@ async def process() -> None:
                     logger.warning("Answer must be y or n")
                 else:
                     break
+        with open("data.txt", "r") as f:
+            query_ids = [line.strip() for line in f.readlines()]
         if multithread == "y":
-            with open("data.txt", "r") as f:
-                query_ids = [line.strip() for line in f.readlines()]
             await run_tasks_query(query_ids)
         else:
-            with open("data.txt", "r") as f:
-                query_ids = [line.strip() for line in f.readlines()]
+            await run_tasks_query_single(query_ids)
 
-            await run_tasks_query1(query_ids)
-
-
-async def run_tasks(accounts: [Any, Any, list], used_session_names: [str]):
-    key = "unrestricted_key"  # Default key without restrictions
+async def run_tasks(accounts: list[dict], used_session_names: list[str]):
+    """Run tasks in multi-threaded mode without key usage limits."""
     tasks = []
-
     for account in accounts:
         session_name, user_agent, raw_proxy = account.values()
         first_run = session_name not in used_session_names
         tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
         proxy = get_proxy(raw_proxy=raw_proxy)
-        tasks.append(asyncio.create_task(run_tapper(
-            multithread=True,
-            tg_client=tg_client,
-            user_agent=user_agent,
-            proxy=proxy,
-            first_run=first_run,
-            key=key
-        )))
+        # Set a default key without usage restrictions
+        key = "unrestricted_key"
+        tasks.append(asyncio.create_task(run_tapper(multithread=True, tg_client=tg_client, user_agent=user_agent, proxy=proxy,
+                                                    first_run=first_run, key=key)))
         await asyncio.sleep(randint(5, 20))
 
     await asyncio.gather(*tasks)
 
-async def run_tasks1(accounts: [Any, Any, list], used_session_names: [str]):
-    key = "unrestricted_key"  # Default key without restrictions
+async def run_tasks_single(accounts: list[dict], used_session_names: list[str]):
+    """Run tasks in single-threaded mode without key usage limits."""
     while True:
         for account in accounts:
             session_name, user_agent, raw_proxy = account.values()
             first_run = session_name not in used_session_names
             tg_client = await get_tg_client(session_name=session_name, proxy=raw_proxy)
             proxy = get_proxy(raw_proxy=raw_proxy)
-            await run_tapper(
-                tg_client=tg_client,
-                user_agent=user_agent,
-                proxy=proxy,
-                first_run=first_run,
-                multithread=False,
-                key=key
-            )
+            # Use a default key without restriction
+            key = "unrestricted_key"
+            await run_tapper(tg_client=tg_client, user_agent=user_agent, proxy=proxy,
+                             first_run=first_run, multithread=False, key=key)
             await asyncio.sleep(randint(settings.DELAY_EACH_ACCOUNT[0], settings.DELAY_EACH_ACCOUNT[1]))
         sleep_time = randint(settings.SLEEP_TIME[0], settings.SLEEP_TIME[1])
-        logger.info(f"<cyan>Sleep <yellow>{round(sleep_time / 60, 1)} </yellow>minutes</cyan>")
+        logger.info(f"Sleeping for {round(sleep_time / 60, 1)} minutes")
         await asyncio.sleep(sleep_time)
 
-async def run_tasks_query(query_ids: list[str]) -> None:
+# Similarly, remove key limits for query tasks:
+async def run_tasks_query(query_ids: list[str]):
+    """Run query tasks in multi-threaded mode without key usage limits."""
+    proxies = get_proxies()
+    proxies_cycle = cycle(proxies) if proxies else None
     tasks = []
-    key = "unrestricted_key"  # Default key without restrictions
-
-    for query_id in query_ids:
-        tg_client = await get_tg_client(session_name=query_id)
-        tasks.append(asyncio.create_task(run_query_tapper(
-            tg_client=tg_client,
-            query_id=query_id,
-            key=key
-        )))
-        await asyncio.sleep(randint(5, 20))
+    for query in query_ids:
+        proxy = next(proxies_cycle) if proxies_cycle else None
+        key = "unrestricted_key"
+        tasks.append(asyncio.create_task(run_query_tapper(query=query, proxy=proxy, multithread=True, key=key)))
 
     await asyncio.gather(*tasks)
 
-async def run_tasks_query1(query_ids: list[str]) -> None:
-    key = "unrestricted_key"  # Default key without restrictions
+async def run_tasks_query_single(query_ids: list[str]):
+    """Run query tasks in single-threaded mode without key usage limits."""
     while True:
-        for query_id in query_ids:
-            tg_client = await get_tg_client(session_name=query_id)
-            await run_query_tapper(
-                tg_client=tg_client,
-                query_id=query_id,
-                key=key
-            )
+        proxies = get_proxies()
+        proxies_cycle = cycle(proxies) if proxies else None
+        for query in query_ids:
+            proxy = next(proxies_cycle) if proxies_cycle else None
+            key = "unrestricted_key"
+            await run_query_tapper(query=query, proxy=proxy, multithread=False, key=key)
             await asyncio.sleep(randint(settings.DELAY_EACH_ACCOUNT[0], settings.DELAY_EACH_ACCOUNT[1]))
         sleep_time = randint(settings.SLEEP_TIME[0], settings.SLEEP_TIME[1])
-        logger.info(f"<cyan>Sleep <yellow>{round(sleep_time / 60, 1)} </yellow>minutes</cyan>")
+        logger.info(f"Sleeping for {round(sleep_time / 60, 1)} minutes")
         await asyncio.sleep(sleep_time)
-
-if __name__ == "__main__":
-    asyncio.run(process())
